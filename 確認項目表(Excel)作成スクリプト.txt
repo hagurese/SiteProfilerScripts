@@ -1,0 +1,526 @@
+//確認項目表(Excel)作成スクリプト
+// ver.1.0.0.0
+// 2015/7/11
+// hagurese
+// 自己責任にてご自由にお使いください。
+
+//設定方法
+//(1)Fiddlerを用意します。 http://www.telerik.com/fiddler
+//(2)SiteProfilerを用意します。 http://www.hagurese.net/factory/action/detail/2
+//(3)Fiddlerを起動し、「SiteProfiler」タブより「設定」ボタンを押します。
+//(4)「設定」ダイアログが開きますので、「レポート設定」タブにて「新規追加」ボタンを押します。
+//(5)「タイトル」に分かりやすい名前を設定しします。例. 確認項目表(Excel)
+//(6)「説明」に分かりやすい説明を設定します。空欄でも構いません。
+//(7)「スクリプト」にこのソースをCopy & Paste します。
+//(8)「設定」ダイアログを閉じます。
+//使用方法
+//(9)サイト情報を収集した後、「レポート」ボタンを押します。
+//(10)「レポート出力」ダイアログが表示されますので、「タイトル」を選択して「レポート出力」ボタンを押します。
+
+//定数(適宜カスタマイズして使ってください。)
+var hostchks = new string[]
+{
+ "ホスト単位で確認する項目を並べます。",
+ "暗号化通信の使用",
+ "暗号化通信の強度",
+ "サーバー証明書",
+ "OPTIONSメソッドの使用",
+ "TRACEメソッドの使用",
+ "URLに対するパストラバーサル",
+ "Serverヘッダでのバナー表示"
+};
+var pathchks = new string[]
+{
+ "パス単位で確認する項目を並べます。",
+ "ディレクトリー一覧の表示",
+ "隠しコンテンツの存在"
+};
+var urlchks = new string[]
+{
+ "リクエスト単位で確認する項目を並べます。",
+ "ブルートフォース",
+ "セッションフィクセーション",
+ "強制ブラウジング",
+ "クロスサイトリクエストフォージェリー",
+ "クリックジャッキング"
+};
+var reqchks = new string[]
+{
+ "リクエストパラメータ単位で確認する項目を並べます。",
+ "SQLインジェクション",
+ "パストラバーサル",
+ "クロスサイトスクリプティング",
+ "HTTPレスポンスヘッダインジェクション"
+};
+var reschks = new string[]
+{
+ "レスポンスパラメータ単位で確認する項目を並べます。",
+ "クロスサイトスクリプティング",
+ "HTTPレスポンスヘッダインジェクション",
+ "機密情報の保持"
+};
+
+//以下、スクリプトコード
+//ファイル選択
+var file = GetFile("ファイルを選択してください。","xls","Excel文書(*.xls)|*.xls");
+if(string.IsNullOrWhiteSpace(file))
+{
+ return;
+}
+
+//ヘッダーセル
+var hcell = new Action<dynamic, int, int, string>((s, c, r, v) =>
+{
+ UsingComObject(() => s.Cells(r, c), (cell) =>
+ {
+  UsingComObject(() => cell.Interior, (itr) =>
+  {
+   itr.ColorIndex = 15;
+  });
+  cell.Value = v;
+ });
+});
+
+//データセル
+var dcell = new Action<dynamic, int, int, string>((s, c, r, v) =>
+{
+  if(v.Length > 512)
+  {
+   s(r, c).Value = v.Substring(0, 512);
+  }
+  else
+  {
+   s(r, c).Value = v;
+  }
+});
+
+var ncell = new Action<dynamic, int, int, int>((s, c, r, v) =>
+{
+ s(r, c).Value = v.ToString();
+});
+
+//お行儀悪いけど例外を捨てます。
+try
+{
+
+//Excelオブジェクト作成
+UsingComObject(() => CreateObject("Excel.Application"), (app) =>
+{
+ UsingComObject(() => app.Workbooks, (wbs) =>
+ {
+  UsingComObject(() => wbs.Add(), (wb) =>
+  {
+   UsingComObject(() => wb.Sheets, (wss) =>
+   {
+    //初期化
+    var row = 0;
+    var col = 0;
+    var idx = 0;
+    var idx2 = 0;
+    var pathes = new List<string>();
+    var hosts = new List<string>();
+    //遷移明細
+    for(var i = 0; i < model.Transitions.Count; i++)
+    {
+     var trans = model.Transitions[model.Transitions.Count - 1 - i];
+     if(trans != null)
+     {
+      UsingComObject(() => wss.Add(), (ws) =>
+      {
+       ws.Name = "遷移" + (model.Transitions.Count - 1 - i).ToString() + "_" + trans.TransitionID;
+       UsingComObject(() => ws.Cells, (cells) =>
+       {
+        cells.NumberFormatLocal = "@";
+        //遷移
+        row = 1;
+        hcell(ws, 1, row, "遷移ID");
+        dcell(cells, 2, row, trans.TransitionID);
+        row++;
+        hcell(ws, 1, row, "遷移元画面名");
+        dcell(cells, 2, row, trans.SourceName);
+        row++;
+        hcell(ws, 1, row, "アクション名");
+        dcell(cells, 2, row, trans.ActionName);
+        row++;
+        hcell(ws, 1, row, "遷移先画面名");
+        dcell(cells, 2, row, trans.DestinationName);
+        //セッション
+        row += 2;
+        hcell(ws, 1, row, "No.");
+        hcell(ws, 2, row, "URL");
+        hcell(ws, 3, row, "");
+        hcell(ws, 4, row, "");
+        col = 5;
+        foreach(var chk in urlchks)
+        {
+         hcell(ws, col, row, chk);
+         col++;
+        }
+        row++;
+        idx = 1;
+        foreach(var sess in trans.Sessions)
+        {
+         if(sess != null)
+         {
+          ncell(cells, 1, row, idx);
+          dcell(cells, 2, row, sess.Request.Url.RawUrl);
+          row++;
+          idx++;
+         }
+        }
+        row++;
+        //遷移明細パラメータ
+        idx = 1;
+        foreach(var sess in trans.Sessions)
+        {
+         if(sess != null)
+         {
+          hcell(ws, 1, row, "No.");
+          ncell(cells, 2, row, idx);
+          row++;
+          hcell(ws, 1, row, "Request");
+          row++;
+          hcell(ws, 1, row, "No.");
+          hcell(ws, 2, row, "Type");
+          hcell(ws, 3, row, "Name");
+          hcell(ws, 4, row, "Value");
+          col = 5;
+          foreach(var chk in reqchks)
+          {
+           hcell(ws, col, row, chk);
+           col++;
+          }
+          row++;
+          idx2 = 1;
+          ncell(cells, 1, row, idx2);
+          dcell(cells, 2, row, "HTTP");
+          dcell(cells, 3, row, "Method");
+          dcell(cells, 4, row, sess.Request.Method);
+          row++;
+          idx2++;
+          ncell(cells, 1, row, idx2);
+          dcell(cells, 2, row, "HTTP");
+          dcell(cells, 3, row, "URL");
+          dcell(cells, 4, row, sess.Request.Url.RawUrl);
+          row++;
+          idx2++;
+          foreach(var key in sess.Request.Url.Parameters.AllKeys)
+          {
+           foreach(var value in sess.Request.Url.Parameters.GetValues(key))
+           {
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "URLParameter");
+            dcell(cells, 3, row, key);
+            dcell(cells, 4, row, value);
+            row++;
+            idx2++;
+           }
+          }
+          foreach(var key in sess.Request.Url.Queries.AllKeys)
+          {
+           foreach(var value in sess.Request.Url.Queries.GetValues(key))
+           {
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "URLQueryString");
+            dcell(cells, 3, row, key);
+            dcell(cells, 4, row, value);
+            row++;
+            idx2++;
+           }
+          }
+          foreach(var key in sess.Request.Headers.AllKeys)
+          {
+           foreach(var value in sess.Request.Headers.GetValues(key))
+           {
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "Header");
+            dcell(cells, 3, row, key);
+            dcell(cells, 4, row, value);
+            row++;
+            idx2++;
+           }
+          }
+          foreach(var key in sess.Request.Cookies.AllKeys)
+          {
+           foreach(var value in sess.Request.Cookies.GetValues(key))
+           {
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "Cookie");
+            dcell(cells, 3, row, key);
+            dcell(cells, 4, row, value);
+            row++;
+            idx2++;
+           }
+          }
+          foreach(var key in sess.Request.Body.Elements.AllKeys)
+          {
+           foreach(var value in (new List<string>(sess.Request.Body.Elements.GetValues(key))).Distinct().ToArray())
+           {
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "BodyElement");
+            dcell(cells, 3, row, key);
+            dcell(cells, 4, row, value);
+            row++;
+            idx2++;
+           }
+          }
+          foreach(var key in sess.Request.Body.Files)
+          {
+           ncell(cells, 1, row, idx2);
+           dcell(cells, 2, row, "BodyElement");
+           dcell(cells, 3, row, "FileName");
+           dcell(cells, 4, row, key.FileName);
+           row++;
+           idx2++;
+          }
+          if(sess.HasResponse)
+          {
+           hcell(ws, 1, row, "Response");
+           row++;
+           hcell(ws, 1, row, "No.");
+           hcell(ws, 2, row, "Type");
+           hcell(ws, 3, row, "Name");
+           hcell(ws, 4, row, "Value");
+           col = 5;
+           foreach(var chk in reschks)
+           {
+            hcell(ws, col, row, chk);
+            col++;
+           }
+           row++;
+           idx2 = 1;
+           ncell(cells, 1, row, idx2);
+           dcell(cells, 2, row, "Status");
+           dcell(cells, 3, row, sess.Response.Status);
+           dcell(cells, 4, row, sess.Response.Result);
+           row++;
+           idx2++;
+           foreach(var key in sess.Response.Headers.AllKeys)
+           {
+            foreach(var value in sess.Response.Headers.GetValues(key))
+            {
+             ncell(cells, 1, row, idx2);
+             dcell(cells, 2, row, "Header");
+             dcell(cells, 3, row, key);
+             dcell(cells, 4, row, value);
+             row++;
+             idx2++;
+            }
+           }
+           foreach(var key in sess.Response.SetCookies)
+           {
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "Set-Cookie");
+            dcell(cells, 3, row, key.Name);
+            dcell(cells, 4, row, key.Value);
+            row++;
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "Set-Cookie");
+            hcell(ws, 3, row, "Domain");
+            dcell(cells, 4, row, key.Domain);
+            row++;
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "Set-Cookie");
+            hcell(ws, 3, row, "Path");
+            dcell(cells, 4, row, key.Path);
+            row++;
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "Set-Cookie");
+            hcell(ws, 3, row, "Expires");
+            dcell(cells, 4, row, key.Expires);
+            row++;
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "Set-Cookie");
+            hcell(ws, 3, row, "HTTPOnly");
+            dcell(cells, 4, row, key.HTTPOnly.ToString());
+            row++;
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "Set-Cookie");
+            hcell(ws, 3, row, "Secure");
+            dcell(cells, 4, row, key.Secure.ToString());
+            row++;
+            idx2++;
+           }
+           foreach(var key in sess.Response.Body.Elements.AllKeys)
+           {
+            foreach(var value in (new List<string>(sess.Response.Body.Elements.GetValues(key))).Distinct().ToArray())
+            {
+             ncell(cells, 1, row, idx2);
+             dcell(cells, 2, row, "BodyElement");
+             dcell(cells, 3, row, key);
+             dcell(cells, 4, row, value);
+             row++;
+             idx2++;
+            }
+           }
+           foreach(var key in sess.Response.Body.Comments)
+           {
+            ncell(cells, 1, row, idx2);
+            dcell(cells, 2, row, "BodyComment");
+            dcell(cells, 3, row, "");
+            dcell(cells, 4, row, key);
+            row++;
+            idx2++;
+           }
+          }
+          row++;
+          idx++;
+         }
+        }
+        //画像
+        UsingComObject(() => ws.Range("A" + row.ToString()), (rng) =>
+        {
+         var top = rng.Top;
+         UsingComObject(() => ws.Shapes, (shps) =>
+         {
+          var imagefile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "temp.png");
+          var image = trans.SourceImage;
+          if(image != null)
+          {
+           SaveBitmapToPng(image, imagefile);
+           shps.AddPicture(imagefile, 0, -1, 8, top, image.Width * 3 / 4, image.Height * 3 / 4);
+           System.IO.File.Delete(imagefile);
+           top += image.Height;
+          }
+          top += 16;
+          image = trans.DestinationImage;
+          if(image != null)
+          {
+           SaveBitmapToPng(image, imagefile);
+           shps.AddPicture(imagefile, 0, -1, 8, top, image.Width * 3 / 4, image.Height * 3 / 4);
+           System.IO.File.Delete(imagefile);
+          }
+         });
+        });
+       });
+      });
+     }
+    }
+    //遷移一覧
+    UsingComObject(() => wss.Add(), (ws) =>
+    {
+     ws.Name = "遷移一覧";
+     UsingComObject(() => ws.Cells, (cells) =>
+     {
+      cells.NumberFormatLocal = "@";
+      hcell(ws, 1, 1, "No.");
+      hcell(ws, 2, 1, "遷移ID");
+      hcell(ws, 3, 1, "遷移元画面名");
+      hcell(ws, 4, 1, "アクション名");
+      hcell(ws, 5, 1, "遷移先画面名");
+      hcell(ws, 6, 1, "URL");
+      col = 7;
+      foreach(var chk in urlchks)
+      {
+       hcell(ws, col, 1, chk);
+       col++;
+      }
+      idx = 1;
+      row = 2;
+      for(var i = 0; i < model.Transitions.Count; i++)
+      {
+       var trans = model.Transitions[i];
+       if(trans != null)
+       {
+        foreach(var sess in trans.Sessions)
+        {
+         if(sess != null)
+         {
+          ncell(cells, 1, row, idx);
+          dcell(cells, 2, row, trans.TransitionID);
+          dcell(cells, 3, row, trans.SourceName);
+          dcell(cells, 4, row, trans.ActionName);
+          dcell(cells, 5, row, trans.DestinationName);
+          dcell(cells, 6, row, sess.Request.Url.RawUrl);
+          var pc = sess.Request.Url.Protocol + "://" + sess.Request.Url.Host;
+          if(sess.Request.Url.Port != -1)
+          {
+           pc += ":" + sess.Request.Url.Port.ToString();
+          }
+          pc += "/";
+          hosts.Add(pc);
+          pathes.Add(pc);
+          foreach(var p in sess.Request.Url.Pathes)
+          {
+           pc += p + "/";
+           pathes.Add(pc);
+          }
+          pc += sess.Request.Url.Content;
+          if(!string.IsNullOrWhiteSpace(sess.Request.Url.Ext))
+          {
+           pc += "." + sess.Request.Url.Ext;
+          }
+          pathes.Add(pc);
+          row++;
+          idx++;
+         }
+        }
+       }
+      }
+     });
+    });
+    //パスコンテンツ一覧
+    UsingComObject(() => wss.Add(), (ws) =>
+    {
+     ws.Name = "パスコンテンツ一覧";
+     UsingComObject(() => ws.Cells, (cells) =>
+     {
+      cells.NumberFormatLocal = "@";
+      hcell(ws, 1, 1, "No.");
+      hcell(ws, 2, 1, "パスコンテンツ名");
+      col = 3;
+      foreach(var chk in pathchks)
+      {
+       hcell(ws, col, 1, chk);
+       col++;
+      }
+      idx = 1;
+      row = 2;
+      pathes.Distinct().OrderBy(p => p).All((p) =>
+      {
+       ncell(cells, 1, row, idx);
+       dcell(cells, 2, row, p);
+       row++;
+       idx++;
+       return true;
+      });
+     });
+    });
+    //ホスト一覧
+    UsingComObject(() => wss.Add(), (ws) =>
+    {
+     ws.Name = "ホスト一覧";
+     UsingComObject(() => ws.Cells, (cells) =>
+     {
+      cells.NumberFormatLocal = "@";
+      hcell(ws, 1, 1, "No.");
+      hcell(ws, 2, 1, "ホスト名");
+      col = 3;
+      foreach(var chk in hostchks)
+      {
+       hcell(ws, col, 1, chk);
+       col++;
+      }
+      idx = 1;
+      row = 2;
+      hosts.Distinct().OrderBy(p => p).All((p) =>
+      {
+       ncell(cells, 1, row, idx);
+       dcell(cells, 2, row, p);
+       row++;
+       idx++;
+       return true;
+      });
+     });
+    });
+   });
+   wb.SaveAs(file, 1);//xlWorkbookNormal
+   wb.Close();
+  });
+ });
+ app.Quit();
+});
+
+}catch
+{
+}
